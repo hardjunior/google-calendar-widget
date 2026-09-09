@@ -11,6 +11,7 @@ from calendar_widget.widget import CalendarWidget
 from calendar_widget.tray import TrayIcon
 from calendar_widget.dialogs import SetupDialog, EventDialog
 from calendar_widget import calendar_api
+from calendar_widget import settings
 
 
 class CalendarApp:
@@ -52,12 +53,19 @@ class CalendarApp:
         self.widget = CalendarWidget()
         self.widget.show_on_all_screens()
 
+        # Apply saved always-on-top preference
+        if settings.get_always_on_top():
+            self.widget.set_always_on_top(True)
+
         # Create tray icon
         self.tray = TrayIcon()
         self.tray.show_widget.connect(self.widget.show)
         self.tray.hide_widget.connect(self.widget.hide)
         self.tray.refresh.connect(self.widget.refresh_events)
         self.tray.create_event.connect(self._create_event_from_tray)
+        self.tray.toggle_always_on_top.connect(self.widget.set_always_on_top)
+        self.widget.always_on_top_changed.connect(self.tray.set_always_on_top_checked)
+        self.tray.change_background.connect(self.widget.set_background_theme)
         self.tray.quit_app.connect(self._quit)
 
         # Check day changes and event alerts every minute

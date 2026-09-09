@@ -51,6 +51,28 @@ def set_window_geometry(x: int, y: int, width: int, height: int) -> None:
     _settings.sync()
 
 
+def get_always_on_top() -> bool:
+    """Return whether always-on-top is enabled."""
+    return _settings.value("window/always_on_top", False, type=bool)
+
+
+def set_always_on_top(enabled: bool) -> None:
+    """Save always-on-top preference."""
+    _settings.setValue("window/always_on_top", enabled)
+    _settings.sync()
+
+
+def get_background_theme() -> str:
+    """Return the saved background theme name."""
+    return _settings.value("appearance/background_theme", "dark", type=str)
+
+
+def set_background_theme(theme: str) -> None:
+    """Save background theme preference."""
+    _settings.setValue("appearance/background_theme", theme)
+    _settings.sync()
+
+
 def get_autostart() -> bool:
     """Return whether autostart is enabled."""
     return _settings.value("general/autostart", False, type=bool)

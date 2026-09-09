@@ -5,6 +5,7 @@ from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QAction
 from PyQt6.QtCore import pyqtSignal, QObject
 
 from calendar_widget import settings
+from calendar_widget.styles import BACKGROUND_THEMES
 
 
 
@@ -47,6 +48,8 @@ class TrayIcon(QObject):
     hide_widget = pyqtSignal()
     refresh = pyqtSignal()
     create_event = pyqtSignal()
+    toggle_always_on_top = pyqtSignal(bool)
+    change_background = pyqtSignal(str)
     quit_app = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -104,6 +107,31 @@ class TrayIcon(QObject):
 
         menu.addSeparator()
 
+        self.always_on_top_action = QAction("Sempre no topo", menu)
+        self.always_on_top_action.setCheckable(True)
+        self.always_on_top_action.setChecked(settings.get_always_on_top())
+        self.always_on_top_action.triggered.connect(self._toggle_always_on_top)
+        menu.addAction(self.always_on_top_action)
+
+        # Background theme submenu
+        bg_menu = QMenu("Cor de fundo", menu)
+        bg_menu.setStyleSheet(menu.styleSheet())
+        current_theme = settings.get_background_theme()
+        self._bg_actions: dict[str, QAction] = {}
+        for theme_key, theme_info in BACKGROUND_THEMES.items():
+            action = QAction(theme_info["label"], bg_menu)
+            action.setCheckable(True)
+            action.setChecked(theme_key == current_theme)
+            action.setData(theme_key)
+            action.triggered.connect(
+                lambda checked, key=theme_key: self._on_background_selected(key)
+            )
+            bg_menu.addAction(action)
+            self._bg_actions[theme_key] = action
+        menu.addMenu(bg_menu)
+
+        menu.addSeparator()
+
         self.autostart_action = QAction("Iniciar com o sistema", menu)
         self.autostart_action.setCheckable(True)
         self.autostart_action.setChecked(settings.get_autostart())
@@ -152,6 +180,26 @@ class TrayIcon(QObject):
                 QSystemTrayIcon.MessageIcon.Information,
                 duration_ms,
             )
+
+    def _toggle_always_on_top(self, checked: bool) -> None:
+        """Toggle always-on-top and persist."""
+        settings.set_always_on_top(checked)
+        self.toggle_always_on_top.emit(checked)
+
+    def set_always_on_top_checked(self, checked: bool) -> None:
+        """Update tray menu action checkmark without re-emitting."""
+        if hasattr(self, "always_on_top_action"):
+            self.always_on_top_action.blockSignals(True)
+            self.always_on_top_action.setChecked(checked)
+            self.always_on_top_action.blockSignals(False)
+
+    def _on_background_selected(self, theme_key: str) -> None:
+        """Handle background theme selection."""
+        settings.set_background_theme(theme_key)
+        # Update checkmarks
+        for key, action in self._bg_actions.items():
+            action.setChecked(key == theme_key)
+        self.change_background.emit(theme_key)
 
     def _toggle_autostart(self, checked: bool) -> None:
         """Toggle autostart with system."""

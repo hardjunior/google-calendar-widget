@@ -18,8 +18,10 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QScrollArea,
     QWidget,
+    QFrame,
+    QStackedWidget,
 )
-from PyQt6.QtCore import Qt, QDateTime, pyqtSignal
+from PyQt6.QtCore import Qt, QDateTime, pyqtSignal, QThread
 from PyQt6.QtGui import QFont
 
 from calendar_widget.styles import DIALOG_STYLE, SETUP_DIALOG_STYLE, COLORS
@@ -645,83 +647,222 @@ class CalendarFilterDialog(QDialog):
         self.accept()
 
 
+class AuthWorker(QThread):
+    """Worker thread to run OAuth local server without blocking the GUI."""
+    finished_success = pyqtSignal(object)
+    finished_error = pyqtSignal(str)
+
+    def run(self) -> None:
+        try:
+            from calendar_widget.auth import authenticate
+            creds = authenticate()
+            if creds:
+                self.finished_success.emit(creds)
+            else:
+                self.finished_error.emit("A autenticação não foi concluída. Tente novamente.")
+        except Exception as e:
+            self.finished_error.emit(str(e))
+
+
 class SetupDialog(QDialog):
-    """Dialog to guide user through Google API setup."""
+    """Dialog to guide user through Google Calendar connection."""
 
     auth_completed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Configuração - Google Calendar Widget")
-        self.setFixedSize(560, 520)
+        self.setWindowTitle("Conectar ao Google - Google Calendar Widget")
+        self.setFixedSize(540, 500)
         self.setStyleSheet(SETUP_DIALOG_STYLE)
         self.setWindowFlags(
             Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint
         )
+        self._auth_worker: Optional[AuthWorker] = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(32, 32, 32, 32)
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(36, 32, 36, 28)
 
+        # Header
         title = QLabel("Google Calendar Widget")
         title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        main_layout.addWidget(title)
 
         subtitle = QLabel(
-            "Para usar o widget, é necessário configurar o acesso\n"
-            "à API do Google Calendar."
+            "Sincronize sua agenda e veja seus compromissos\n"
+            "diretamente na sua área de trabalho."
         )
         subtitle.setObjectName("subtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
+        main_layout.addWidget(subtitle)
 
-        instructions = QLabel(
-            "1. Acesse o Google Cloud Console\n"
-            "2. Crie um projeto (ou use um existente)\n"
-            "3. Ative a Google Calendar API\n"
-            "4. Crie credenciais OAuth 2.0 (tipo Desktop)\n"
-            "5. Baixe o arquivo JSON das credenciais\n"
-            "6. Clique em 'Importar Credenciais' abaixo"
-        )
-        instructions.setStyleSheet(
-            f"color: {COLORS['text_primary']}; font-size: 13px; "
-            f"line-height: 1.8; padding: 12px 0;"
-        )
-        layout.addWidget(instructions)
+        # Stacked pages for Easy Mode vs Advanced Mode
+        self.stack = QStackedWidget()
 
-        console_btn = QPushButton("Abrir Google Cloud Console")
-        console_btn.clicked.connect(self._open_console)
-        layout.addWidget(console_btn)
+        # Page 0: Quick Connect (1 click)
+        self.quick_page = self._create_quick_page()
+        self.stack.addWidget(self.quick_page)
 
-        layout.addSpacing(8)
+        # Page 1: Advanced / Manual Credentials
+        self.manual_page = self._create_manual_page()
+        self.stack.addWidget(self.manual_page)
 
-        import_btn = QPushButton("Importar Credenciais (JSON)")
-        import_btn.setStyleSheet(
-            import_btn.styleSheet()
-            + f"QPushButton {{ background-color: {COLORS['success']}; }}"
-        )
+        main_layout.addWidget(self.stack)
+
+        # Determine which page to show initially
+        from calendar_widget.auth import has_client_secret
+        if has_client_secret():
+            self.stack.setCurrentWidget(self.quick_page)
+        else:
+            self.stack.setCurrentWidget(self.manual_page)
+
+    def _create_quick_page(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(18)
+        layout.setContentsMargins(0, 8, 0, 0)
+
+        # Info card
+        info_card = QFrame()
+        info_card.setObjectName("info_card")
+        card_layout = QVBoxLayout(info_card)
+        card_layout.setSpacing(10)
+        card_layout.setContentsMargins(16, 16, 16, 16)
+
+        item1 = QLabel("🔒  Autenticação segura via Google OAuth 2.0")
+        item1.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px; font-weight: 500;")
+        card_layout.addWidget(item1)
+
+        item2 = QLabel("⚡  Acesso em 1 clique: autorize na sua conta Google no navegador")
+        item2.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        card_layout.addWidget(item2)
+
+        item3 = QLabel("💻  Seus dados e tokens ficam armazenados somente no seu computador")
+        item3.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        card_layout.addWidget(item3)
+
+        layout.addWidget(info_card)
+        layout.addSpacing(6)
+
+        # Connect button
+        self.connect_btn = QPushButton("🌐  Conectar com o Google")
+        self.connect_btn.setObjectName("connect_btn")
+        self.connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.connect_btn.clicked.connect(self._start_quick_connect)
+        layout.addWidget(self.connect_btn)
+
+        # Status label
+        self.status_label = QLabel("Clique no botão acima para autorizar no seu navegador.")
+        self.status_label.setObjectName("status_label")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        layout.addStretch()
+
+        # Advanced link
+        advanced_btn = QPushButton("⚙️ Configurações avançadas (trocar credenciais)")
+        advanced_btn.setObjectName("link_btn")
+        advanced_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        advanced_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self.manual_page))
+        layout.addWidget(advanced_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        return widget
+
+    def _create_manual_page(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        info = QLabel("Configurar credenciais da API Google (client_secret.json):")
+        info.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px; font-weight: 500;")
+        layout.addWidget(info)
+
+        btns_row = QHBoxLayout()
+        btns_row.setSpacing(8)
+
+        import_btn = QPushButton("📁 Importar Arquivo JSON")
+        import_btn.setObjectName("secondary_btn")
+        import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         import_btn.clicked.connect(self._import_credentials)
-        layout.addWidget(import_btn)
+        btns_row.addWidget(import_btn)
 
-        paste_label = QLabel("Ou cole o conteúdo JSON aqui:")
-        paste_label.setStyleSheet(
-            f"color: {COLORS['text_secondary']}; font-size: 12px;"
-        )
+        console_btn = QPushButton("🌐 Abrir Console Google")
+        console_btn.setObjectName("secondary_btn")
+        console_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        console_btn.clicked.connect(self._open_console)
+        btns_row.addWidget(console_btn)
+
+        layout.addLayout(btns_row)
+
+        paste_label = QLabel("Ou cole o conteúdo do client_secret.json abaixo:")
+        paste_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
         layout.addWidget(paste_label)
 
         self.json_edit = QTextEdit()
         self.json_edit.setPlaceholderText('{"installed": {"client_id": "...", ...}}')
-        self.json_edit.setMaximumHeight(100)
+        self.json_edit.setMaximumHeight(85)
         layout.addWidget(self.json_edit)
 
-        save_json_btn = QPushButton("Salvar e Conectar")
+        save_json_btn = QPushButton("Salvar Credenciais e Conectar")
+        save_json_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_json_btn.clicked.connect(self._save_pasted_json)
         layout.addWidget(save_json_btn)
 
         layout.addStretch()
+
+        # Link back to quick connect if client secret exists
+        self.back_btn = QPushButton("⬅ Voltar para conexão rápida")
+        self.back_btn.setObjectName("link_btn")
+        self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.back_btn.clicked.connect(self._back_to_quick)
+        layout.addWidget(self.back_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        return widget
+
+    def _back_to_quick(self) -> None:
+        from calendar_widget.auth import has_client_secret
+        if has_client_secret():
+            self.stack.setCurrentWidget(self.quick_page)
+        else:
+            QMessageBox.information(
+                self, "Aviso",
+                "É necessário importar ou colar as credenciais antes de prosseguir."
+            )
+
+    def _start_quick_connect(self) -> None:
+        self.connect_btn.setEnabled(False)
+        self.connect_btn.setText("Aguardando no navegador...")
+        self.status_label.setText(
+            "🔄 Abrindo navegador... Faça login e clique em 'Permitir' para concluir."
+        )
+
+        self._auth_worker = AuthWorker(self)
+        self._auth_worker.finished_success.connect(self._on_auth_success)
+        self._auth_worker.finished_error.connect(self._on_auth_error)
+        self._auth_worker.start()
+
+    def _on_auth_success(self, creds) -> None:
+        self.status_label.setText("✅ Conectado com sucesso!")
+        QMessageBox.information(
+            self, "Sucesso",
+            "Conexão com o Google Calendar estabelecida com sucesso!",
+        )
+        self.auth_completed.emit()
+        self.accept()
+
+    def _on_auth_error(self, err_msg: str) -> None:
+        self.connect_btn.setEnabled(True)
+        self.connect_btn.setText("🌐  Tentar Conectar Novamente")
+        self.status_label.setText(f"❌ {err_msg}")
+        QMessageBox.warning(
+            self, "Aviso",
+            f"Não foi possível autenticar:\n{err_msg}\n\nPor favor, tente novamente.",
+        )
 
     def _open_console(self) -> None:
         from calendar_widget.auth import open_setup_instructions
@@ -734,11 +875,12 @@ class SetupDialog(QDialog):
         )
         if file_path:
             try:
-                with open(file_path, "r") as f:
+                with open(file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 from calendar_widget.auth import save_client_secret
                 save_client_secret(data)
-                self._try_authenticate()
+                self.stack.setCurrentWidget(self.quick_page)
+                self._start_quick_connect()
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Arquivo inválido: {e}")
 
@@ -753,22 +895,7 @@ class SetupDialog(QDialog):
             data = json.load(io.StringIO(text))
             from calendar_widget.auth import save_client_secret
             save_client_secret(data)
-            self._try_authenticate()
+            self.stack.setCurrentWidget(self.quick_page)
+            self._start_quick_connect()
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"JSON inválido: {e}")
-
-    def _try_authenticate(self) -> None:
-        from calendar_widget.auth import authenticate
-        creds = authenticate()
-        if creds:
-            QMessageBox.information(
-                self, "Sucesso",
-                "Conexão com o Google Calendar estabelecida!",
-            )
-            self.auth_completed.emit()
-            self.accept()
-        else:
-            QMessageBox.warning(
-                self, "Aviso",
-                "Não foi possível autenticar. Tente novamente.",
-            )

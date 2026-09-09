@@ -1,16 +1,40 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-*.egg-info/
+
+# Packaging & Builds
 dist/
 build/
+*.egg-info/
 .eggs/
 *.egg
+*.spec
+
+# Virtual Environments
 .env
-venv/
 .venv/
-credentials/
-token.json
+venv/
+ENV/
+
+# Google OAuth credentials & tokens (NEVER COMMIT SENSITIVE DATA)
 client_secret*.json
+!client_secret.json.example
+credentials*.json
+token*.json
+credentials/
 *.pickle
+
+# IDEs and Editors
+.vscode/
+.idea/
+
+# OS-specific files
 .DS_Store
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# Logs & Tests
+*.log
+.pytest_cache/

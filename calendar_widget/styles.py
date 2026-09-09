@@ -30,13 +30,49 @@ COLORS = {
     "success": "#4CAF50",
 }
 
-MAIN_WIDGET_STYLE = f"""
+# Background theme presets: (bg_color, border_color, label)
+BACKGROUND_THEMES = {
+    "dark": {
+        "bg": "rgba(18, 18, 24, 200)",
+        "border": "rgba(100, 100, 140, 80)",
+        "label": "Escuro (padrão)",
+    },
+    "light": {
+        "bg": "rgba(240, 240, 245, 210)",
+        "border": "rgba(180, 180, 200, 120)",
+        "label": "Claro",
+    },
+    "blue": {
+        "bg": "rgba(15, 25, 50, 200)",
+        "border": "rgba(60, 100, 180, 100)",
+        "label": "Azul",
+    },
+    "purple": {
+        "bg": "rgba(30, 15, 45, 200)",
+        "border": "rgba(120, 80, 180, 100)",
+        "label": "Roxo",
+    },
+    "green": {
+        "bg": "rgba(10, 30, 20, 200)",
+        "border": "rgba(60, 160, 100, 100)",
+        "label": "Verde",
+    },
+}
+
+
+def get_main_widget_style(theme: str = "dark") -> str:
+    """Return the main widget style for a given background theme."""
+    t = BACKGROUND_THEMES.get(theme, BACKGROUND_THEMES["dark"])
+    return f"""
 QWidget#mainWidget {{
-    background-color: {COLORS['bg_primary']};
+    background-color: {t['bg']};
     border-radius: 16px;
-    border: 1px solid {COLORS['border']};
+    border: 1px solid {t['border']};
 }}
 """
+
+
+MAIN_WIDGET_STYLE = get_main_widget_style("dark")
 
 HEADER_STYLE = f"""
 QLabel#headerMonth {{
@@ -336,13 +372,23 @@ QLabel {{
     font-size: 14px;
 }}
 QLabel#title {{
-    font-size: 22px;
+    font-size: 24px;
     font-weight: bold;
     color: {COLORS['accent']};
 }}
 QLabel#subtitle {{
     font-size: 13px;
     color: {COLORS['text_secondary']};
+    line-height: 1.4;
+}}
+QLabel#status_label {{
+    font-size: 13px;
+    color: {COLORS['text_secondary']};
+}}
+QFrame#info_card {{
+    background-color: {COLORS['bg_card']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 12px;
 }}
 QPushButton {{
     background-color: {COLORS['accent']};
@@ -350,12 +396,51 @@ QPushButton {{
     border: none;
     border-radius: 8px;
     padding: 12px 28px;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', sans-serif;
 }}
 QPushButton:hover {{
     background-color: {COLORS['accent_light']};
+}}
+QPushButton#connect_btn {{
+    background-color: #4285F4;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 14px 24px;
+    font-size: 16px;
+    font-weight: bold;
+}}
+QPushButton#connect_btn:hover {{
+    background-color: #3367D6;
+}}
+QPushButton#connect_btn:disabled {{
+    background-color: #3A3D4A;
+    color: {COLORS['text_muted']};
+}}
+QPushButton#link_btn {{
+    background: transparent;
+    color: {COLORS['text_muted']};
+    border: none;
+    font-size: 12px;
+    padding: 4px 8px;
+    text-decoration: underline;
+    font-weight: normal;
+}}
+QPushButton#link_btn:hover {{
+    color: {COLORS['text_primary']};
+}}
+QPushButton#secondary_btn {{
+    background-color: {COLORS['bg_card']};
+    color: {COLORS['text_primary']};
+    border: 1px solid {COLORS['border']};
+    font-size: 13px;
+    padding: 8px 16px;
+}}
+QPushButton#secondary_btn:hover {{
+    background-color: {COLORS['bg_hover']};
+    border-color: {COLORS['accent']};
 }}
 QTextEdit {{
     background-color: {COLORS['bg_card']};
@@ -392,5 +477,41 @@ QPushButton:hover {{
     background-color: {COLORS['bg_hover']};
     border-color: {COLORS['accent']};
     color: {COLORS['text_primary']};
+}}
+"""
+
+PIN_BUTTON_STYLE = f"""
+QPushButton {{
+    background-color: {COLORS['bg_card']};
+    color: {COLORS['text_muted']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    min-width: 36px;
+    min-height: 36px;
+}}
+QPushButton:hover {{
+    background-color: {COLORS['bg_hover']};
+    border-color: {COLORS['accent']};
+    color: {COLORS['text_primary']};
+}}
+"""
+
+PIN_BUTTON_ACTIVE_STYLE = f"""
+QPushButton {{
+    background-color: {COLORS['accent']};
+    color: white;
+    border: 1px solid {COLORS['accent_light']};
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    min-width: 36px;
+    min-height: 36px;
+}}
+QPushButton:hover {{
+    background-color: {COLORS['accent_light']};
 }}
 """

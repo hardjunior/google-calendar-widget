@@ -2,6 +2,7 @@
 
 import calendar
 import datetime
+import sys
 from collections import defaultdict
 from typing import Optional
 
@@ -33,9 +34,12 @@ from calendar_widget.styles import (
     TODAY_BUTTON_STYLE,
     RESIZE_GRIP_STYLE,
     CALENDAR_FILTER_BUTTON_STYLE,
+    PIN_BUTTON_STYLE,
+    PIN_BUTTON_ACTIVE_STYLE,
     COLORS,
     get_day_cell_style,
     get_day_number_style,
+    get_main_widget_style,
 )
 from calendar_widget.holidays_br import (
     get_brazilian_holidays,
@@ -97,6 +101,7 @@ class CalendarWidget(QWidget):
     """Main calendar widget that displays on the desktop."""
 
     refresh_requested = pyqtSignal()
+    always_on_top_changed = pyqtSignal(bool)
 
     # Edge resize constants
     EDGE_MARGIN = 8
@@ -121,6 +126,7 @@ class CalendarWidget(QWidget):
 
         self._setup_window()
         self._setup_ui()
+        self._apply_saved_background()
         self._load_holidays()
         self._load_calendar_list()
 
@@ -131,12 +137,11 @@ class CalendarWidget(QWidget):
         self.setMouseTracking(True)
 
     def _setup_window(self) -> None:
-        """Configure the window to be frameless and transparent."""
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnBottomHint
-            | Qt.WindowType.Tool
-        )
+        """Configure the window to be frameless, transparent and styled."""
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+        if settings.get_always_on_top():
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMinimumSize(700, 500)
 
@@ -204,6 +209,13 @@ class CalendarWidget(QWidget):
         self.next_btn.setStyleSheet(NAV_BUTTON_STYLE)
         self.next_btn.clicked.connect(self._next_month)
         header_layout.addWidget(self.next_btn)
+
+        # Pin (Always on top) button
+        self.pin_btn = QPushButton("📌")
+        self.pin_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.pin_btn.clicked.connect(self._toggle_pin)
+        self._update_pin_button_style(settings.get_always_on_top())
+        header_layout.addWidget(self.pin_btn)
 
         # Calendar filter button
         self.filter_btn = QPushButton("\u2630")
@@ -618,7 +630,86 @@ class CalendarWidget(QWidget):
         self.unsetCursor()
         super().mouseReleaseEvent(event)
 
+    def _toggle_pin(self) -> None:
+        """Toggle always-on-top state when header pin button is clicked."""
+        new_state = not settings.get_always_on_top()
+        self.set_always_on_top(new_state)
+        self.always_on_top_changed.emit(new_state)
+
+    def _update_pin_button_style(self, enabled: bool) -> None:
+        """Update appearance and tooltip of the pin button based on state."""
+        if not hasattr(self, "pin_btn"):
+            return
+        if enabled:
+            self.pin_btn.setStyleSheet(PIN_BUTTON_ACTIVE_STYLE)
+            self.pin_btn.setToolTip("Sempre no topo: Ativado (clique para desafixar)")
+        else:
+            self.pin_btn.setStyleSheet(PIN_BUTTON_STYLE)
+            self.pin_btn.setToolTip("Sempre no topo: Desativado (clique para fixar no topo)")
+
+    def set_always_on_top(self, enabled: bool) -> None:
+        """Toggle the always-on-top window flag and enforce via Win32 API."""
+        settings.set_always_on_top(enabled)
+        self._update_pin_button_style(enabled)
+
+        # Update Qt window flags
+        flags = self.windowFlags()
+        if enabled:
+            flags = (flags | Qt.WindowType.WindowStaysOnTopHint) & ~Qt.WindowType.WindowStaysOnBottomHint
+        else:
+            flags = flags & ~Qt.WindowType.WindowStaysOnTopHint
+
+        was_visible = self.isVisible()
+        self.setWindowFlags(flags)
+        if was_visible:
+            self.show()
+
+        # Enforce on Windows via Win32 SetWindowPos
+        if sys.platform == "win32":
+            self._apply_win32_topmost(enabled)
+
+    def _apply_win32_topmost(self, enabled: bool) -> None:
+        """Directly enforce HWND_TOPMOST or HWND_NOTOPMOST on Windows."""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u32 = ctypes.windll.user32
+            u32.SetWindowPos.argtypes = [
+                wintypes.HWND, wintypes.HWND,
+                ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                wintypes.UINT
+            ]
+            u32.SetWindowPos.restype = wintypes.BOOL
+
+            HWND_TOPMOST = -1
+            HWND_NOTOPMOST = -2
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOACTIVATE = 0x0010
+            SWP_SHOWWINDOW = 0x0040
+
+            target = HWND_TOPMOST if enabled else HWND_NOTOPMOST
+            hwnd = int(self.winId())
+            u32.SetWindowPos(
+                hwnd, target, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW
+            )
+        except Exception as e:
+            print(f"[TopMost Error] {e}")
+
+    def set_background_theme(self, theme: str) -> None:
+        """Apply a background theme to the widget."""
+        self.main_frame.setStyleSheet(get_main_widget_style(theme))
+
+    def _apply_saved_background(self) -> None:
+        """Apply the saved background theme on startup."""
+        theme = settings.get_background_theme()
+        if theme != "dark":
+            self.main_frame.setStyleSheet(get_main_widget_style(theme))
+
     def show_on_all_screens(self) -> None:
         """Show the widget, centered on primary screen."""
         self.show()
+        if settings.get_always_on_top() and sys.platform == "win32":
+            self._apply_win32_topmost(True)
         self.refresh_events()
