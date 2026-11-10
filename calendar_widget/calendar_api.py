@@ -32,6 +32,33 @@ REMINDER_OPTIONS: dict[str, int] = {
     "1 semana antes": 10080,
 }
 
+# Google Calendar standard event color palette (indexed 1-11)
+GOOGLE_EVENT_COLORS = {
+    "1": "#7986CB",  # Lavender
+    "2": "#33B679",  # Sage
+    "3": "#8E24AA",  # Grape
+    "4": "#E67C73",  # Flamingo
+    "5": "#F6BF26",  # Banana
+    "6": "#F4511E",  # Tangerine
+    "7": "#039BE5",  # Peacock
+    "8": "#616161",  # Graphite
+    "9": "#3F51B5",  # Blueberry
+    "10": "#0B8043", # Basil
+    "11": "#D50000", # Tomato
+}
+
+
+def get_user_timezone() -> str:
+    """Detect local timezone or fallback to America/Sao_Paulo."""
+    try:
+        from datetime import datetime as _dt
+        tz = _dt.now().astimezone().tzinfo
+        if hasattr(tz, "key") and tz.key:
+            return tz.key
+    except Exception:
+        pass
+    return "America/Sao_Paulo"
+
 
 def get_service(creds: Optional[Credentials] = None):
     """Build and return the Google Calendar API service."""
@@ -75,6 +102,7 @@ def get_events_for_month(
     year: int,
     month: int,
     calendar_ids: Optional[list[str]] = None,
+    calendar_colors: Optional[dict[str, str]] = None,
     creds: Optional[Credentials] = None,
 ) -> list[dict]:
     """Fetch all events for a given month from specified calendars.
@@ -116,6 +144,13 @@ def get_events_for_month(
             items = events_result.get("items", [])
             for item in items:
                 item["_calendarId"] = cal_id
+                cid = item.get("colorId")
+                if cid and cid in GOOGLE_EVENT_COLORS:
+                    item["_color"] = GOOGLE_EVENT_COLORS[cid]
+                elif calendar_colors and cal_id in calendar_colors:
+                    item["_color"] = calendar_colors[cal_id]
+                else:
+                    item["_color"] = "#6C63FF"
             all_events.extend(items)
         except Exception:
             pass
@@ -173,6 +208,7 @@ def create_event(
     recurrence: Optional[str] = None,
     reminder_minutes_list: Optional[list[int]] = None,
     calendar_id: str = "primary",
+    is_all_day: bool = False,
     creds: Optional[Credentials] = None,
 ) -> Optional[dict]:
     """Create a new calendar event."""
@@ -180,18 +216,30 @@ def create_event(
     if service is None:
         return None
 
+    tz_name = get_user_timezone()
+
+    if is_all_day:
+        start_date = start_datetime.date() if hasattr(start_datetime, "date") else start_datetime
+        end_date = end_datetime.date() if hasattr(end_datetime, "date") else end_datetime
+        exclusive_end = end_date + datetime.timedelta(days=1)
+        start_payload = {"date": start_date.strftime("%Y-%m-%d")}
+        end_payload = {"date": exclusive_end.strftime("%Y-%m-%d")}
+    else:
+        start_payload = {
+            "dateTime": start_datetime.isoformat(),
+            "timeZone": tz_name,
+        }
+        end_payload = {
+            "dateTime": end_datetime.isoformat(),
+            "timeZone": tz_name,
+        }
+
     event_body: dict = {
         "summary": summary,
         "description": description,
         "location": location,
-        "start": {
-            "dateTime": start_datetime.isoformat(),
-            "timeZone": "America/Sao_Paulo",
-        },
-        "end": {
-            "dateTime": end_datetime.isoformat(),
-            "timeZone": "America/Sao_Paulo",
-        },
+        "start": start_payload,
+        "end": end_payload,
     }
 
     if recurrence:
@@ -221,6 +269,7 @@ def update_event(
     recurrence: Optional[str] = None,
     reminder_minutes_list: Optional[list[int]] = None,
     calendar_id: str = "primary",
+    is_all_day: bool = False,
     creds: Optional[Credentials] = None,
 ) -> Optional[dict]:
     """Update an existing calendar event."""
@@ -228,18 +277,30 @@ def update_event(
     if service is None:
         return None
 
+    tz_name = get_user_timezone()
+
+    if is_all_day:
+        start_date = start_datetime.date() if hasattr(start_datetime, "date") else start_datetime
+        end_date = end_datetime.date() if hasattr(end_datetime, "date") else end_datetime
+        exclusive_end = end_date + datetime.timedelta(days=1)
+        start_payload = {"date": start_date.strftime("%Y-%m-%d")}
+        end_payload = {"date": exclusive_end.strftime("%Y-%m-%d")}
+    else:
+        start_payload = {
+            "dateTime": start_datetime.isoformat(),
+            "timeZone": tz_name,
+        }
+        end_payload = {
+            "dateTime": end_datetime.isoformat(),
+            "timeZone": tz_name,
+        }
+
     event_body: dict = {
         "summary": summary,
         "description": description,
         "location": location,
-        "start": {
-            "dateTime": start_datetime.isoformat(),
-            "timeZone": "America/Sao_Paulo",
-        },
-        "end": {
-            "dateTime": end_datetime.isoformat(),
-            "timeZone": "America/Sao_Paulo",
-        },
+        "start": start_payload,
+        "end": end_payload,
     }
 
     if recurrence:
@@ -287,24 +348,37 @@ def parse_event_datetime(
     """Parse start and end datetime from an event.
 
     Handles both dateTime and date (all-day) events.
+    Always returns normalized timezone-naive datetimes in local time for safe comparison.
     """
+    now = datetime.datetime.now()
     start = event.get("start", {})
     end = event.get("end", {})
 
-    if "dateTime" in start:
-        start_dt = datetime.datetime.fromisoformat(
-            start["dateTime"].replace("Z", "+00:00")
-        )
-    else:
-        start_dt = datetime.datetime.fromisoformat(start.get("date", ""))
+    def _parse_single(d_dict: dict, fallback_dt: datetime.datetime) -> datetime.datetime:
+        if not d_dict or not isinstance(d_dict, dict):
+            return fallback_dt
+        if "dateTime" in d_dict and d_dict["dateTime"]:
+            try:
+                dt_str = str(d_dict["dateTime"]).replace("Z", "+00:00")
+                dt = datetime.datetime.fromisoformat(dt_str)
+                if dt.tzinfo is not None:
+                    return dt.astimezone().replace(tzinfo=None)
+                return dt
+            except Exception:
+                pass
+        if "date" in d_dict and d_dict["date"]:
+            try:
+                d_str = str(d_dict["date"])
+                d = datetime.date.fromisoformat(d_str)
+                return datetime.datetime(d.year, d.month, d.day, 0, 0, 0)
+            except Exception:
+                pass
+        return fallback_dt
 
-    if "dateTime" in end:
-        end_dt = datetime.datetime.fromisoformat(
-            end["dateTime"].replace("Z", "+00:00")
-        )
-    else:
-        end_dt = datetime.datetime.fromisoformat(end.get("date", ""))
-
+    start_dt = _parse_single(start, now)
+    end_dt = _parse_single(end, start_dt)
+    if end_dt < start_dt:
+        end_dt = start_dt
     return start_dt, end_dt
 
 
@@ -353,13 +427,26 @@ def get_event_days(event: dict, year: int, month: int) -> list[int]:
     return days if days else [start_dt.day]
 
 
+def is_all_day_event(event: dict) -> bool:
+    """Check if an event is an all-day event."""
+    start = event.get("start", {})
+    return "date" in start and "dateTime" not in start
+
+
 def get_event_time_str(event: dict) -> str:
     """Get a formatted time string for an event."""
-    start = event.get("start", {})
-    if "dateTime" in start:
-        start_dt, _ = parse_event_datetime(event)
-        return start_dt.strftime("%H:%M")
-    return "Dia inteiro"
+    if is_all_day_event(event):
+        return "Dia inteiro"
+    start_dt, _ = parse_event_datetime(event)
+    return start_dt.strftime("%H:%M")
+
+
+def get_event_time_range_str(event: dict) -> str:
+    """Get formatted time range string (e.g. '09:00 - 10:30' or 'Dia inteiro')."""
+    if is_all_day_event(event):
+        return "Dia inteiro"
+    start_dt, end_dt = parse_event_datetime(event)
+    return f"{start_dt.strftime('%H:%M')} – {end_dt.strftime('%H:%M')}"
 
 
 def get_event_recurrence_label(event: dict) -> str:

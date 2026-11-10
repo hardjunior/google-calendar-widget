@@ -48,6 +48,7 @@ class TrayIcon(QObject):
     hide_widget = pyqtSignal()
     refresh = pyqtSignal()
     create_event = pyqtSignal()
+    open_tasks = pyqtSignal()
     toggle_always_on_top = pyqtSignal(bool)
     change_background = pyqtSignal(str)
     quit_app = pyqtSignal()
@@ -104,6 +105,10 @@ class TrayIcon(QObject):
         new_event_action = QAction("Novo Compromisso", menu)
         new_event_action.triggered.connect(self.create_event.emit)
         menu.addAction(new_event_action)
+
+        tasks_action = QAction("📋 Gerenciar Tarefas...", menu)
+        tasks_action.triggered.connect(self.open_tasks.emit)
+        menu.addAction(tasks_action)
 
         menu.addSeparator()
 

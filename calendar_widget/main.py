@@ -63,6 +63,7 @@ class CalendarApp:
         self.tray.hide_widget.connect(self.widget.hide)
         self.tray.refresh.connect(self.widget.refresh_events)
         self.tray.create_event.connect(self._create_event_from_tray)
+        self.tray.open_tasks.connect(self.widget.open_task_manager)
         self.tray.toggle_always_on_top.connect(self.widget.set_always_on_top)
         self.widget.always_on_top_changed.connect(self.tray.set_always_on_top_checked)
         self.tray.change_background.connect(self.widget.set_background_theme)

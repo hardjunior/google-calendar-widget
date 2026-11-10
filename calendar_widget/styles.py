@@ -137,11 +137,26 @@ QLabel {{
 """
 
 
+def hex_to_rgba(hex_code: str, alpha: float = 1.0) -> str:
+    """Convert hex color to rgba string."""
+    hex_code = hex_code.strip().lstrip("#")
+    if len(hex_code) == 3:
+        hex_code = "".join(c * 2 for c in hex_code)
+    try:
+        r = int(hex_code[0:2], 16)
+        g = int(hex_code[2:4], 16)
+        b = int(hex_code[4:6], 16)
+        return f"rgba({r}, {g}, {b}, {int(alpha * 255)})"
+    except Exception:
+        return f"rgba(108, 99, 255, {int(alpha * 255)})"
+
+
 def get_day_cell_style(
     is_today: bool = False,
     is_weekend: bool = False,
     is_holiday: bool = False,
     is_other_month: bool = False,
+    is_selected: bool = False,
 ) -> str:
     """Generate style for a day cell based on its properties."""
     if is_other_month:
@@ -157,7 +172,11 @@ def get_day_cell_style(
     border_color = "transparent"
     border_width = "1px"
 
-    if is_today:
+    if is_selected:
+        bg_color = "rgba(108, 99, 255, 45)"
+        border_color = COLORS["accent"]
+        border_width = "2px"
+    elif is_today:
         bg_color = COLORS["today_bg"]
         border_color = COLORS["today"]
         border_width = "2px"
@@ -176,7 +195,7 @@ def get_day_cell_style(
     }}
     QFrame:hover {{
         background-color: {COLORS['bg_hover']};
-        border-color: {COLORS['accent']};
+        border-color: {COLORS['accent_light']};
     }}
     """
 
@@ -215,19 +234,114 @@ def get_day_number_style(
     """
 
 
-EVENT_LABEL_STYLE = f"""
-QLabel {{
-    color: {COLORS['text_primary']};
-    font-size: 10px;
-    font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', sans-serif;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background-color: rgba(108, 99, 255, 120);
-    border: none;
-    margin: 1px 2px;
+def get_event_badge_style(color_hex: str = "#6C63FF") -> str:
+    """Generate modern event badge style with colored left border and tinted background."""
+    bg_color = hex_to_rgba(color_hex, 0.22)
+    hover_bg = hex_to_rgba(color_hex, 0.40)
+    return f"""
+    QLabel {{
+        color: #FFFFFF;
+        font-size: 10px;
+        font-weight: 500;
+        font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background-color: {bg_color};
+        border-left: 3px solid {color_hex};
+        border-top: none;
+        border-right: none;
+        border-bottom: none;
+        margin: 1px 2px;
+    }}
+    QLabel:hover {{
+        background-color: {hover_bg};
+    }}
+    """
+
+
+EVENT_LABEL_STYLE = get_event_badge_style("#6C63FF")
+
+VIEW_TOGGLE_BUTTON_STYLE = f"""
+QPushButton {{
+    background-color: {COLORS['bg_card']};
+    color: {COLORS['text_secondary']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'Segoe UI', sans-serif;
 }}
-QLabel:hover {{
-    background-color: rgba(108, 99, 255, 180);
+QPushButton:hover {{
+    background-color: {COLORS['bg_hover']};
+    color: {COLORS['text_primary']};
+}}
+"""
+
+VIEW_TOGGLE_ACTIVE_STYLE = f"""
+QPushButton {{
+    background-color: {COLORS['accent']};
+    color: #FFFFFF;
+    border: 1px solid {COLORS['accent']};
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: bold;
+    font-family: 'Segoe UI', sans-serif;
+}}
+"""
+
+SEARCH_INPUT_STYLE = f"""
+QLineEdit {{
+    background-color: {COLORS['bg_card']};
+    color: {COLORS['text_primary']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-family: 'Segoe UI', sans-serif;
+}}
+QLineEdit:focus {{
+    border: 1px solid {COLORS['accent']};
+    background-color: {COLORS['bg_secondary']};
+}}
+"""
+
+DURATION_CHIP_STYLE = f"""
+QPushButton {{
+    background-color: {COLORS['bg_card']};
+    color: {COLORS['text_secondary']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: 'Segoe UI', sans-serif;
+}}
+QPushButton:hover {{
+    background-color: {COLORS['bg_hover']};
+    color: {COLORS['accent_light']};
+    border-color: {COLORS['accent']};
+}}
+"""
+
+DAY_PANEL_STYLE = f"""
+QWidget#dayPanel {{
+    background-color: {COLORS['bg_secondary']};
+    border-left: 1px solid {COLORS['border']};
+    border-radius: 12px;
+}}
+"""
+
+LOADING_LABEL_STYLE = f"""
+QLabel {{
+    color: {COLORS['accent_light']};
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'Segoe UI', sans-serif;
+    padding: 2px 8px;
+    background: transparent;
+    border: none;
 }}
 """
 
@@ -513,5 +627,53 @@ QPushButton {{
 }}
 QPushButton:hover {{
     background-color: {COLORS['accent_light']};
+}}
+"""
+
+TASK_CARD_STYLE = f"""
+QFrame {{
+    background-color: {COLORS['bg_card']};
+    border-radius: 10px;
+    border: 1px solid {COLORS['border']};
+}}
+QFrame:hover {{
+    background-color: {COLORS['bg_hover']};
+    border-color: {COLORS['accent_light']};
+}}
+"""
+
+ACTION_BTN_STYLE = f"""
+QPushButton {{
+    background-color: rgba(255, 255, 255, 14);
+    color: {COLORS['text_primary']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: 'Segoe UI', sans-serif;
+}}
+QPushButton:hover {{
+    background-color: {COLORS['bg_hover']};
+    border-color: {COLORS['accent']};
+    color: #FFFFFF;
+}}
+"""
+
+ACTION_DELETE_BTN_STYLE = f"""
+QPushButton {{
+    background-color: rgba(255, 82, 82, 20);
+    color: {COLORS['danger']};
+    border: 1px solid rgba(255, 82, 82, 60);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: 'Segoe UI', sans-serif;
+}}
+QPushButton:hover {{
+    background-color: rgba(255, 82, 82, 55);
+    border-color: {COLORS['danger']};
+    color: #FFFFFF;
 }}
 """

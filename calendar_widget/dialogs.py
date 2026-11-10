@@ -22,9 +22,22 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
 )
 from PyQt6.QtCore import Qt, QDateTime, pyqtSignal, QThread
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QCursor
 
-from calendar_widget.styles import DIALOG_STYLE, SETUP_DIALOG_STYLE, COLORS
+from calendar_widget.styles import (
+    DIALOG_STYLE,
+    SETUP_DIALOG_STYLE,
+    COLORS,
+    DURATION_CHIP_STYLE,
+    TASK_CARD_STYLE,
+    ACTION_BTN_STYLE,
+    ACTION_DELETE_BTN_STYLE,
+    VIEW_TOGGLE_BUTTON_STYLE,
+    VIEW_TOGGLE_ACTIVE_STYLE,
+    SEARCH_INPUT_STYLE,
+    SCROLLBAR_STYLE,
+    NAV_BUTTON_STYLE,
+)
 from calendar_widget import calendar_api
 from calendar_widget.calendar_api import RECURRENCE_OPTIONS, REMINDER_OPTIONS
 
@@ -100,13 +113,23 @@ class EventDialog(QDialog):
         self.summary_edit.setPlaceholderText("Nome do compromisso...")
         form_layout.addWidget(self.summary_edit)
 
+        # Date & Time section with All-day checkbox
+        time_header_row = QHBoxLayout()
+        time_header_row.addWidget(self._make_field_label("Horário"))
+        time_header_row.addStretch()
+        self.all_day_cb = QCheckBox("Dia inteiro")
+        self.all_day_cb.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px;")
+        self.all_day_cb.toggled.connect(self._on_all_day_toggled)
+        time_header_row.addWidget(self.all_day_cb)
+        form_layout.addLayout(time_header_row)
+
         # Start / End in one row (compact)
         time_row = QHBoxLayout()
         time_row.setSpacing(8)
 
         start_col = QVBoxLayout()
         start_col.setSpacing(2)
-        start_col.addWidget(self._make_field_label("In\u00edcio"))
+        start_col.addWidget(self._make_field_label("Início"))
         self.start_edit = QDateTimeEdit()
         self.start_edit.setDisplayFormat("dd/MM/yy HH:mm")
         self.start_edit.setCalendarPopup(True)
@@ -125,6 +148,23 @@ class EventDialog(QDialog):
         time_row.addLayout(end_col)
 
         form_layout.addLayout(time_row)
+
+        # Duration presets row
+        self.presets_widget = QWidget()
+        presets_layout = QHBoxLayout(self.presets_widget)
+        presets_layout.setContentsMargins(0, 0, 0, 0)
+        presets_layout.setSpacing(4)
+        duration_label = QLabel("Duração:")
+        duration_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        presets_layout.addWidget(duration_label)
+
+        for text, mins in [("+15m", 15), ("+30m", 30), ("+45m", 45), ("+1h", 60), ("+2h", 120)]:
+            chip = QPushButton(text)
+            chip.setStyleSheet(DURATION_CHIP_STYLE)
+            chip.clicked.connect(lambda _, m=mins: self._apply_duration(m))
+            presets_layout.addWidget(chip)
+        presets_layout.addStretch()
+        form_layout.addWidget(self.presets_widget)
 
         # Recurrence + Location in one row
         extra_row = QHBoxLayout()
@@ -247,6 +287,24 @@ class EventDialog(QDialog):
         )
         return label
 
+    def _apply_duration(self, minutes: int) -> None:
+        """Add duration to the start datetime to set end datetime."""
+        start_qdt = self.start_edit.dateTime()
+        self.end_edit.setDateTime(start_qdt.addSecs(minutes * 60))
+
+    def _on_all_day_toggled(self, checked: bool) -> None:
+        """Toggle UI between all-day mode and timed mode."""
+        if checked:
+            self.start_edit.setDisplayFormat("dd/MM/yyyy")
+            self.end_edit.setDisplayFormat("dd/MM/yyyy")
+            if hasattr(self, "presets_widget"):
+                self.presets_widget.setVisible(False)
+        else:
+            self.start_edit.setDisplayFormat("dd/MM/yy HH:mm")
+            self.end_edit.setDisplayFormat("dd/MM/yy HH:mm")
+            if hasattr(self, "presets_widget"):
+                self.presets_widget.setVisible(True)
+
     def _populate_from_event(self) -> None:
         if not self.event:
             return
@@ -254,19 +312,38 @@ class EventDialog(QDialog):
         self.location_edit.setText(self.event.get("location", ""))
         self.description_edit.setPlainText(self.event.get("description", ""))
 
+        is_all_day = calendar_api.is_all_day_event(self.event)
+        self.all_day_cb.setChecked(is_all_day)
+
         start_dt, end_dt = calendar_api.parse_event_datetime(self.event)
-        self.start_edit.setDateTime(
-            QDateTime(
-                start_dt.year, start_dt.month, start_dt.day,
-                start_dt.hour, start_dt.minute,
+        if is_all_day:
+            # Google Calendar stores all-day end date as exclusive (end_date + 1 day)
+            display_end = end_dt - datetime.timedelta(days=1)
+            if display_end < start_dt:
+                display_end = start_dt
+            self.start_edit.setDateTime(
+                QDateTime(
+                    start_dt.year, start_dt.month, start_dt.day, 0, 0
+                )
             )
-        )
-        self.end_edit.setDateTime(
-            QDateTime(
-                end_dt.year, end_dt.month, end_dt.day,
-                end_dt.hour, end_dt.minute,
+            self.end_edit.setDateTime(
+                QDateTime(
+                    display_end.year, display_end.month, display_end.day, 0, 0
+                )
             )
-        )
+        else:
+            self.start_edit.setDateTime(
+                QDateTime(
+                    start_dt.year, start_dt.month, start_dt.day,
+                    start_dt.hour, start_dt.minute,
+                )
+            )
+            self.end_edit.setDateTime(
+                QDateTime(
+                    end_dt.year, end_dt.month, end_dt.day,
+                    end_dt.hour, end_dt.minute,
+                )
+            )
 
         # Set recurrence
         recur_label = calendar_api.get_event_recurrence_label(self.event)
@@ -382,6 +459,8 @@ class EventDialog(QDialog):
         if self.calendar_combo:
             cal_id = self.calendar_combo.currentData() or "primary"
 
+        is_all_day = self.all_day_cb.isChecked()
+
         if self.is_edit and self.event:
             result = calendar_api.update_event(
                 event_id=self.event["id"],
@@ -393,6 +472,7 @@ class EventDialog(QDialog):
                 recurrence=recurrence,
                 reminder_minutes_list=reminder_minutes_list,
                 calendar_id=cal_id,
+                is_all_day=is_all_day,
             )
         else:
             result = calendar_api.create_event(
@@ -404,6 +484,7 @@ class EventDialog(QDialog):
                 recurrence=recurrence,
                 reminder_minutes_list=reminder_minutes_list,
                 calendar_id=cal_id,
+                is_all_day=is_all_day,
             )
 
         if result:
@@ -461,19 +542,43 @@ class EventViewDialog(QDialog):
             layout.addWidget(QLabel("Evento não encontrado."))
             return
 
+        # Calendar badge
+        cal_color = self.event.get("_color", COLORS["accent"])
+        cal_id = self.event.get("_calendarId", "")
+        cal_name = self.event.get("_calendarSummary", "")
+        if not cal_name and hasattr(self.parent(), "calendars"):
+            for c in getattr(self.parent(), "calendars", []):
+                if c.get("id") == cal_id:
+                    cal_name = c.get("summary", "")
+                    break
+        if not cal_name:
+            cal_name = "Google Calendar"
+
+        cal_row = QHBoxLayout()
+        cal_row.setSpacing(6)
+        cal_dot = QLabel()
+        cal_dot.setFixedSize(8, 8)
+        cal_dot.setStyleSheet(
+            f"background-color: {cal_color}; border-radius: 4px; border: none;"
+        )
+        cal_row.addWidget(cal_dot)
+        cal_label = QLabel(cal_name)
+        cal_label.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        cal_label.setStyleSheet(f"color: {cal_color}; border: none;")
+        cal_row.addWidget(cal_label)
+        cal_row.addStretch()
+        layout.addLayout(cal_row)
+
         title = QLabel(self.event.get("summary", "Sem título"))
         title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {COLORS['accent']}; border: none;")
+        title.setStyleSheet(f"color: {COLORS['text_primary']}; border: none;")
         title.setWordWrap(True)
         layout.addWidget(title)
 
-        time_str = calendar_api.get_event_time_str(self.event)
-        start_dt, end_dt = calendar_api.parse_event_datetime(self.event)
+        time_range = calendar_api.get_event_time_range_str(self.event)
+        start_dt, _ = calendar_api.parse_event_datetime(self.event)
         date_str = start_dt.strftime("%d/%m/%Y")
-        end_time = end_dt.strftime("%H:%M") if time_str != "Dia inteiro" else ""
-        time_display = f"{date_str}  •  {time_str}"
-        if end_time:
-            time_display += f" - {end_time}"
+        time_display = f"📅 {date_str}  •  {time_range}"
 
         time_label = QLabel(time_display)
         time_label.setFont(QFont("Segoe UI", 12))
@@ -508,10 +613,23 @@ class EventViewDialog(QDialog):
             sep.setFixedHeight(1)
             sep.setStyleSheet(f"background-color: {COLORS['border']}; border: none;")
             layout.addWidget(sep)
-            desc_label = QLabel(description)
+
+            import html as _html
+            import re as _re
+            safe_desc = _html.escape(description)
+            url_re = _re.compile(r'(https?://[^\s<]+)')
+            linkified = url_re.sub(
+                rf'<a href="\1" style="color: {COLORS["accent_light"]}; text-decoration: underline;">\1</a>',
+                safe_desc,
+            )
+            linkified = linkified.replace("\n", "<br>")
+
+            desc_label = QLabel(linkified)
             desc_label.setFont(QFont("Segoe UI", 11))
             desc_label.setStyleSheet(f"color: {COLORS['text_primary']}; border: none;")
             desc_label.setWordWrap(True)
+            desc_label.setTextFormat(Qt.TextFormat.RichText)
+            desc_label.setOpenExternalLinks(True)
             layout.addWidget(desc_label)
 
         layout.addStretch()
@@ -899,3 +1017,436 @@ class SetupDialog(QDialog):
             self._start_quick_connect()
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"JSON inválido: {e}")
+
+
+class TaskManagerDialog(QDialog):
+    """Dialog to view current and upcoming tasks/events and perform complete CRUD."""
+
+    task_changed = pyqtSignal()
+
+    def __init__(
+        self,
+        parent=None,
+        events: Optional[list[dict]] = None,
+        calendars: Optional[list[dict]] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ):
+        super().__init__(parent)
+        self.calendars = calendars or []
+        self.year = year or datetime.date.today().year
+        self.month = month or datetime.date.today().month
+        self.events: list[dict] = list(events or [])
+        self.filter_mode = "today"  # "today", "upcoming", "all"
+        self.search_query = ""
+
+        self.setWindowTitle("Gerenciador de Tarefas e Compromissos")
+        self.setMinimumSize(680, 560)
+        self.resize(740, 620)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint
+        )
+        self._setup_ui()
+        self._refresh_list()
+
+    def _setup_ui(self) -> None:
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(24, 20, 24, 20)
+        outer_layout.setSpacing(12)
+
+        # Header bar
+        header_row = QHBoxLayout()
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+
+        title_lbl = QLabel("📋 Gerenciador de Tarefas e Compromissos")
+        title_lbl.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {COLORS['accent']}; border: none;")
+        title_col.addWidget(title_lbl)
+
+        subtitle_lbl = QLabel("Visualize tarefas atuais e seguintes com CRUD completo (criar, ver, editar, excluir).")
+        subtitle_lbl.setFont(QFont("Segoe UI", 11))
+        subtitle_lbl.setStyleSheet(f"color: {COLORS['text_secondary']}; border: none;")
+        title_col.addWidget(subtitle_lbl)
+
+        header_row.addLayout(title_col)
+        header_row.addStretch()
+
+        add_btn = QPushButton("+ Nova Tarefa")
+        add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['accent']};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: bold;
+                font-family: 'Segoe UI', sans-serif;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_light']};
+            }}
+        """)
+        add_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        add_btn.clicked.connect(self._create_task)
+        header_row.addWidget(add_btn)
+
+        outer_layout.addLayout(header_row)
+
+        # Filter & Search bar
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+
+        self.btn_today = QPushButton("📌 Atuais (Hoje)")
+        self.btn_today.setStyleSheet(VIEW_TOGGLE_ACTIVE_STYLE)
+        self.btn_today.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.btn_today.clicked.connect(lambda: self._set_filter("today"))
+        filter_row.addWidget(self.btn_today)
+
+        self.btn_upcoming = QPushButton("⏳ Seguintes")
+        self.btn_upcoming.setStyleSheet(VIEW_TOGGLE_BUTTON_STYLE)
+        self.btn_upcoming.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.btn_upcoming.clicked.connect(lambda: self._set_filter("upcoming"))
+        filter_row.addWidget(self.btn_upcoming)
+
+        self.btn_all = QPushButton("📅 Todas")
+        self.btn_all.setStyleSheet(VIEW_TOGGLE_BUTTON_STYLE)
+        self.btn_all.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.btn_all.clicked.connect(lambda: self._set_filter("all"))
+        filter_row.addWidget(self.btn_all)
+
+        filter_row.addStretch()
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("🔍 Filtrar tarefas...")
+        self.search_edit.setStyleSheet(SEARCH_INPUT_STYLE)
+        self.search_edit.setFixedWidth(200)
+        self.search_edit.textChanged.connect(self._on_search_changed)
+        filter_row.addWidget(self.search_edit)
+
+        outer_layout.addLayout(filter_row)
+
+        # Counter / status summary
+        self.summary_label = QLabel("")
+        self.summary_label.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        self.summary_label.setStyleSheet(f"color: {COLORS['text_muted']}; border: none;")
+        outer_layout.addWidget(self.summary_label)
+
+        # Scroll area for tasks
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet(SCROLLBAR_STYLE)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self.cards_container = QWidget()
+        self.cards_container.setStyleSheet("background: transparent;")
+        self.cards_layout = QVBoxLayout(self.cards_container)
+        self.cards_layout.setContentsMargins(0, 0, 0, 0)
+        self.cards_layout.setSpacing(8)
+
+        self.scroll_area.setWidget(self.cards_container)
+        outer_layout.addWidget(self.scroll_area, 1)
+
+        # Bottom close button
+        bottom_row = QHBoxLayout()
+        bottom_row.addStretch()
+        close_btn = QPushButton("Fechar")
+        close_btn.setObjectName("cancelBtn")
+        close_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        close_btn.clicked.connect(self.accept)
+        bottom_row.addWidget(close_btn)
+        outer_layout.addLayout(bottom_row)
+
+    def _set_filter(self, mode: str) -> None:
+        self.filter_mode = mode
+        self.btn_today.setStyleSheet(
+            VIEW_TOGGLE_ACTIVE_STYLE if mode == "today" else VIEW_TOGGLE_BUTTON_STYLE
+        )
+        self.btn_upcoming.setStyleSheet(
+            VIEW_TOGGLE_ACTIVE_STYLE if mode == "upcoming" else VIEW_TOGGLE_BUTTON_STYLE
+        )
+        self.btn_all.setStyleSheet(
+            VIEW_TOGGLE_ACTIVE_STYLE if mode == "all" else VIEW_TOGGLE_BUTTON_STYLE
+        )
+        self._refresh_list()
+
+    def _on_search_changed(self, text: str) -> None:
+        self.search_query = text.strip().lower()
+        self._refresh_list()
+
+    def _refresh_list(self) -> None:
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        now = datetime.datetime.now()
+        today = now.date()
+        tomorrow = today + datetime.timedelta(days=1)
+
+        filtered = []
+        for ev in self.events:
+            try:
+                start_dt, end_dt = calendar_api.parse_event_datetime(ev)
+                ev_start_date = start_dt.date()
+                ev_end_date = end_dt.date()
+            except Exception:
+                continue
+
+            if self.filter_mode == "today":
+                if not (ev_start_date <= today <= ev_end_date):
+                    continue
+            elif self.filter_mode == "upcoming":
+                if ev_start_date <= today:
+                    continue
+
+            if self.search_query:
+                summary = ev.get("summary", "").lower()
+                desc = ev.get("description", "").lower()
+                loc = ev.get("location", "").lower()
+                if (
+                    self.search_query not in summary
+                    and self.search_query not in desc
+                    and self.search_query not in loc
+                ):
+                    continue
+
+            filtered.append(ev)
+
+        filtered.sort(key=lambda ev: calendar_api.parse_event_datetime(ev)[0])
+
+        count = len(filtered)
+        if self.filter_mode == "today":
+            self.summary_label.setText(f"{count} tarefa{'s' if count != 1 else ''} atual{'is' if count != 1 else ''} (hoje)")
+        elif self.filter_mode == "upcoming":
+            self.summary_label.setText(f"{count} tarefa{'s' if count != 1 else ''} seguinte{'s' if count != 1 else ''} (futuras)")
+        else:
+            self.summary_label.setText(f"{count} tarefa{'s' if count != 1 else ''} no total")
+
+        if not filtered:
+            empty_box = QWidget()
+            empty_layout = QVBoxLayout(empty_box)
+            empty_layout.setContentsMargins(20, 40, 20, 40)
+            empty_layout.setSpacing(10)
+            empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            msg = QLabel("Nenhuma tarefa encontrada para este filtro.")
+            msg.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 13px; font-style: italic;")
+            msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_layout.addWidget(msg)
+
+            new_btn = QPushButton("+ Criar nova tarefa")
+            new_btn.setStyleSheet(NAV_BUTTON_STYLE)
+            new_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            new_btn.clicked.connect(self._create_task)
+            empty_layout.addWidget(new_btn, 0, Qt.AlignmentFlag.AlignCenter)
+
+            self.cards_layout.addWidget(empty_box)
+            self.cards_layout.addStretch()
+            return
+
+        for ev in filtered:
+            card = self._build_task_card(ev, now, today, tomorrow)
+            self.cards_layout.addWidget(card)
+
+        self.cards_layout.addStretch()
+
+    def _build_task_card(
+        self, ev: dict, now: datetime.datetime, today: datetime.date, tomorrow: datetime.date
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("taskCard")
+        event_color = ev.get("_color", COLORS["accent"])
+        card.setStyleSheet(f"""
+            QFrame#taskCard {{
+                background-color: {COLORS['bg_card']};
+                border-left: 4px solid {event_color};
+                border-radius: 8px;
+                border-top: 1px solid {COLORS['border']};
+                border-right: 1px solid {COLORS['border']};
+                border-bottom: 1px solid {COLORS['border']};
+            }}
+            QFrame#taskCard:hover {{
+                background-color: {COLORS['bg_hover']};
+                border-color: {COLORS['border_light']};
+            }}
+        """)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 10, 12, 10)
+        card_layout.setSpacing(6)
+
+        # Top row: Status Badge + Time + Calendar name + Action buttons (CRUD)
+        top_row = QHBoxLayout()
+        top_row.setSpacing(6)
+
+        start_dt, end_dt = calendar_api.parse_event_datetime(ev)
+        is_all_day = calendar_api.is_all_day_event(ev)
+
+        # Status Badge
+        status_text = ""
+        status_color = COLORS["text_secondary"]
+        status_bg = "rgba(255, 255, 255, 15)"
+
+        if start_dt.date() <= today <= end_dt.date():
+            if not is_all_day and start_dt <= now <= end_dt:
+                status_text = "🟢 Em andamento"
+                status_color = "#00D4AA"
+                status_bg = "rgba(0, 212, 170, 35)"
+            else:
+                status_text = "📌 Hoje"
+                status_color = COLORS["today"]
+                status_bg = "rgba(0, 212, 170, 25)"
+        elif start_dt.date() == tomorrow:
+            status_text = "⏳ Amanhã"
+            status_color = COLORS["accent_light"]
+            status_bg = "rgba(108, 99, 255, 30)"
+        elif start_dt.date() > tomorrow:
+            day_name = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"][start_dt.weekday()]
+            status_text = f"📅 {day_name}, {start_dt.strftime('%d/%m')}"
+            status_color = COLORS["text_secondary"]
+            status_bg = "rgba(255, 255, 255, 15)"
+        else:
+            status_text = "Passada"
+            status_color = COLORS["text_muted"]
+            status_bg = "rgba(255, 255, 255, 10)"
+
+        status_badge = QLabel(status_text)
+        status_badge.setStyleSheet(f"""
+            background-color: {status_bg};
+            color: {status_color};
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: none;
+        """)
+        top_row.addWidget(status_badge)
+
+        # Time range
+        time_str = calendar_api.get_event_time_range_str(ev)
+        time_lbl = QLabel(time_str)
+        time_lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        time_lbl.setStyleSheet(f"color: {COLORS['text_primary']}; border: none;")
+        top_row.addWidget(time_lbl)
+
+        # Calendar tag
+        cal_dot = QLabel("●")
+        cal_dot.setStyleSheet(f"color: {event_color}; font-size: 10px; border: none; margin-left: 4px;")
+        top_row.addWidget(cal_dot)
+
+        cal_name = ev.get("_calendarSummary", "")
+        if not cal_name:
+            for c in self.calendars:
+                if c.get("id") == ev.get("_calendarId"):
+                    cal_name = c.get("summary", "")
+                    break
+        if not cal_name:
+            cal_name = "Agenda"
+        if len(cal_name) > 16:
+            cal_name = cal_name[:14] + "…"
+
+        cal_lbl = QLabel(cal_name)
+        cal_lbl.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 10px; border: none;")
+        top_row.addWidget(cal_lbl)
+
+        top_row.addStretch()
+
+        # CRUD action buttons
+        view_btn = QPushButton("👁️ Ver")
+        view_btn.setStyleSheet(ACTION_BTN_STYLE)
+        view_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        view_btn.setToolTip("Ver detalhes da tarefa")
+        view_btn.clicked.connect(lambda _, e=ev: self._view_task(e))
+        top_row.addWidget(view_btn)
+
+        edit_btn = QPushButton("✏️ Editar")
+        edit_btn.setStyleSheet(ACTION_BTN_STYLE)
+        edit_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        edit_btn.setToolTip("Editar tarefa")
+        edit_btn.clicked.connect(lambda _, e=ev: self._edit_task(e))
+        top_row.addWidget(edit_btn)
+
+        del_btn = QPushButton("🗑️ Excluir")
+        del_btn.setStyleSheet(ACTION_DELETE_BTN_STYLE)
+        del_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        del_btn.setToolTip("Excluir tarefa")
+        del_btn.clicked.connect(lambda _, e=ev: self._delete_task(e))
+        top_row.addWidget(del_btn)
+
+        card_layout.addLayout(top_row)
+
+        # Summary / Title
+        summary_lbl = QLabel(ev.get("summary", "Sem título"))
+        summary_lbl.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        summary_lbl.setStyleSheet(f"color: {COLORS['text_primary']}; border: none;")
+        summary_lbl.setWordWrap(True)
+        card_layout.addWidget(summary_lbl)
+
+        # Location if any
+        loc = ev.get("location", "")
+        if loc:
+            loc_lbl = QLabel(f"📍 {loc}")
+            loc_lbl.setFont(QFont("Segoe UI", 10))
+            loc_lbl.setStyleSheet(f"color: {COLORS['text_secondary']}; border: none;")
+            loc_lbl.setWordWrap(True)
+            card_layout.addWidget(loc_lbl)
+
+        # Description if any (first 80 chars)
+        desc = ev.get("description", "").strip()
+        if desc:
+            preview = desc.split("\n")[0]
+            if len(preview) > 80:
+                preview = preview[:77] + "…"
+            desc_lbl = QLabel(preview)
+            desc_lbl.setFont(QFont("Segoe UI", 10))
+            desc_lbl.setStyleSheet(f"color: {COLORS['text_muted']}; border: none;")
+            desc_lbl.setWordWrap(True)
+            card_layout.addWidget(desc_lbl)
+
+        return card
+
+    def _create_task(self) -> None:
+        dialog = EventDialog(self, default_date=datetime.date.today(), calendars=self.calendars)
+        dialog.event_saved.connect(self._reload_and_emit)
+        dialog.exec()
+
+    def _view_task(self, event: dict) -> None:
+        dialog = EventViewDialog(self, event)
+        dialog.edit_requested.connect(lambda ev: self._edit_task(ev))
+        dialog.exec()
+
+    def _edit_task(self, event: dict) -> None:
+        dialog = EventDialog(self, event=event, calendars=self.calendars)
+        dialog.event_saved.connect(self._reload_and_emit)
+        dialog.exec()
+
+    def _delete_task(self, event: dict) -> None:
+        title = event.get("summary", "Sem título")
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Exclusão",
+            f"Tem certeza que deseja excluir a tarefa '{title}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            cal_id = event.get("_calendarId", "primary")
+            if calendar_api.delete_event(event["id"], calendar_id=cal_id):
+                self.events = [e for e in self.events if e.get("id") != event.get("id")]
+                self.task_changed.emit()
+                self._refresh_list()
+            else:
+                QMessageBox.critical(self, "Erro", "Não foi possível excluir a tarefa.")
+
+    def _reload_and_emit(self) -> None:
+        self.task_changed.emit()
+        cal_ids = [c["id"] for c in self.calendars if c.get("selected", True)] or None
+        cal_colors = {c["id"]: c.get("backgroundColor", COLORS["accent"]) for c in self.calendars}
+        try:
+            self.events = calendar_api.get_events_for_month(
+                self.year, self.month, calendar_ids=cal_ids, calendar_colors=cal_colors
+            )
+        except Exception:
+            pass
+        self._refresh_list()
